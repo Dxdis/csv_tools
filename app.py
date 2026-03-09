@@ -23,6 +23,7 @@ def smart_read_file(uploaded_file):
             uploaded_file.seek(0)
             return pd.read_csv(uploaded_file, encoding='gbk')
     elif file_name.endswith(('.xls', '.xlsx')):
+        # 这里就是之前报错的地方，有了 requirements.txt 里的 openpyxl 就不报错了
         return pd.read_excel(uploaded_file)
     return None
 
@@ -59,10 +60,10 @@ def generate_joint_key(df, columns):
 # ==========================================
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📁 批量合并", 
-    "🔍 两表校对", 
+    "🔍 两表校对 (找重复/差异)", 
     "🗂️ 批量按条件提取", 
     "✂️ 单表分类拆分", 
-    "🛑 批量黑名单剔除 (多表去重)"
+    "🛑 批量黑名单剔除"
 ])
 
 # ==========================================
@@ -73,7 +74,6 @@ with tab1:
     uploaded_files = st.file_uploader("拖拽多个 CSV/Excel 文件到这里", type=["csv", "xlsx", "xls"], accept_multiple_files=True, key="merge_uploader")
     
     if uploaded_files:
-        # 【限制突破】细粒度文件管理
         file_names = [f.name for f in uploaded_files]
         selected_files = st.multiselect("✅ 请确认要参与合并的文件（取消勾选以剔除错传文件）：", options=file_names, default=file_names)
         valid_files = [f for f in uploaded_files if f.name in selected_files]
@@ -87,14 +87,13 @@ with tab1:
             display_data_dashboard(merged_df, title="📊 合并结果看板")
             
             st.write("✏️ **数据预览与编辑（你可以直接双击下方单元格修改内容，修改后下载生效）：**")
-            # 【限制突破】引入可编辑表格
             edited_df = st.data_editor(merged_df, use_container_width=True, num_rows="dynamic")
             
             csv_data = edited_df.to_csv(index=False).encode('utf-8-sig') 
             st.download_button(label="📥 下载最终合并表格", data=csv_data, file_name=new_file_name, mime="text/csv")
 
 # ==========================================
-# 选项卡 2：两表校对
+# 选项卡 2：两表校对 (为你优化了文案，明确“提取重复数据”功能)
 # ==========================================
 with tab2:
     st.header("校对两批数据文件")
@@ -111,23 +110,26 @@ with tab2:
         st.subheader("⚙️ 设置联合校对规则")
         col3, col4 = st.columns(2)
         with col3:
-            # 【限制突破】单选升级为多选
             key_a = st.multiselect("选择【表格 A】用于比对的列（支持多选作联合主键）：", df_a.columns, default=[df_a.columns[0]])
         with col4:
             key_b = st.multiselect("选择【表格 B】用于比对的列（需与左侧列顺序及数量一致）：", df_b.columns, default=[df_b.columns[0]])
             
-        compare_mode = st.radio("你想查看什么结果？", ["找出两表共有的【重复项】", "找出【表格 A】独有的【差异项】", "找出【表格 B】独有的【差异项】"])
-        compare_name = st.text_input("📝 自定义导出文件名（需包含 .csv 后缀）：", value="双表校对结果.csv", key="tab2_name")
+        # 这里的文案为你做了专门的优化，功能其实就是提取你想要的重复项
+        compare_mode = st.radio("你想查看什么结果？", [
+            "👉 找出两表共有的【重复项】(提取重复数据生成新表)", 
+            "找出【表格 A】独有的【差异项】", 
+            "找出【表格 B】独有的【差异项】"
+        ])
+        compare_name = st.text_input("📝 自定义导出文件名（需包含 .csv 后缀）：", value="两表提取结果.csv", key="tab2_name")
         
         if st.button("开始自动校对", type="primary", key="compare_btn"):
             if len(key_a) != len(key_b) or len(key_a) == 0:
                 st.error("❌ 错误：两表选择的比对列数量必须完全一致且不能为空！")
             else:
-                # 使用自定义函数生成防错的联合键
                 df_a_keys = generate_joint_key(df_a, key_a)
                 df_b_keys = generate_joint_key(df_b, key_b)
                 
-                if compare_mode == "找出两表共有的【重复项】":
+                if compare_mode == "👉 找出两表共有的【重复项】(提取重复数据生成新表)":
                     result_df = df_a[df_a_keys.isin(df_b_keys)]
                 elif compare_mode == "找出【表格 A】独有的【差异项】":
                     result_df = df_a[~df_a_keys.isin(df_b_keys)]
@@ -136,13 +138,13 @@ with tab2:
                     
                 if not result_df.empty:
                     st.success(f"🔍 查验完成！找到 {len(result_df)} 条符合条件的数据。")
-                    display_data_dashboard(result_df, title="📊 校对结果看板")
+                    display_data_dashboard(result_df, title="📊 校对提取结果看板")
                     
                     st.write("✏️ **数据编辑区（可直接修改结果后再导出）：**")
                     edited_result = st.data_editor(result_df, use_container_width=True, num_rows="dynamic")
                     
                     csv_result = edited_result.to_csv(index=False).encode('utf-8-sig')
-                    st.download_button(label="📥 下载当前校对结果", data=csv_result, file_name=compare_name, mime="text/csv")
+                    st.download_button(label="📥 下载提取结果", data=csv_result, file_name=compare_name, mime="text/csv")
                 else:
                     st.info("🤷‍♂️ 根据当前规则，没有找到符合条件的数据。")
 
@@ -154,7 +156,6 @@ with tab3:
     extract_files = st.file_uploader("拖拽多个 CSV/Excel 文件到这里", type=["csv", "xlsx"], accept_multiple_files=True, key="extract_uploader")
     
     if extract_files:
-        # 【限制突破】细粒度文件管理
         e_file_names = [f.name for f in extract_files]
         e_selected_files = st.multiselect("✅ 确认提取范围（取消勾选以排除）：", options=e_file_names, default=e_file_names)
         valid_extract_files = [f for f in extract_files if f.name in e_selected_files]
@@ -231,7 +232,7 @@ with tab4:
                 st.download_button("📥 下载所有拆分后的文件 (ZIP 压缩包)", data=zip_buffer.getvalue(), file_name=split_name, mime="application/zip", type="primary")
 
 # ==========================================
-# 选项卡 5：批量黑名单剔除 (多表去重)
+# 选项卡 5：批量黑名单剔除
 # ==========================================
 with tab5:
     st.header("批量黑名单剔除 (多表联合去重)")
@@ -244,7 +245,6 @@ with tab5:
         blacklist_files = st.file_uploader("🛑 2. 批量上传【黑名单表】", type=["csv", "xlsx"], accept_multiple_files=True, key="blacklist_uploader")
         
     if target_file and blacklist_files:
-        # 【限制突破】剔除不要的黑名单表
         bl_file_names = [f.name for f in blacklist_files]
         bl_selected_files = st.multiselect("✅ 确认启用的黑名单文件：", options=bl_file_names, default=bl_file_names)
         valid_blacklist_files = [f for f in blacklist_files if f.name in bl_selected_files]
@@ -275,7 +275,6 @@ with tab5:
                     
                     for bl_file in valid_blacklist_files:
                         bl_df = smart_read_file(bl_file)
-                        # 确保黑名单表里包含我们要比对的列
                         if all(k in bl_df.columns for k in bl_key):
                             bl_combined_keys = generate_joint_key(bl_df, bl_key)
                             all_blacklist_items.update(bl_combined_keys.tolist())
